@@ -13,8 +13,8 @@
   "prebuilt_key.py": "7b15021b38f7fcecf4a7d6e016a4a0aaa21c77d8b33dc375338b53fb423999e5",
   "profiles/runefactoryguardiansofazuma.android.tsv": "78b445b4164356419ff1c67e4af9c71471b986b36c93964846addb15f65acf22",
   "server_state.py": "43eb08dbb456841f78cb56efc902a6642412b07431ae36fc61e4abbe78884802",
-  "webgui/index.html": "7a607bbc5006600e8c1fa2b249b591305c460c473d284ed00edaf9a165634861",
-  "webgui/server.py": "c0fef345d4daed972df24b1431b436f7687297dea916f290a5d4906769db194d"
+  "webgui/index.html": "cf3dc9e518080716bc4f3c3f29b5b20c2d899394eb92c2a8488792c089abe113",
+  "webgui/server.py": "66731bd6f73d6eb8ce041ed2a719df59b60a44894dd0f3e2e4ce703273af5670"
  },
  "porter_track": "main",
  "porter_good": "e9bd2b764608facf841e39292d868ee657eaf634"
