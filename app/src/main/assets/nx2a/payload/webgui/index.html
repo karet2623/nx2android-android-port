@@ -154,7 +154,37 @@ async function pick(id,dir,path){places(id,dir);if(window.NX2A&&NX2A.pick){$('mn
  $('msel').style.display=dir?'':'none';$('msel').onclick=()=>{$(id).value=r.path;modal.style.display='none';if(id=='folder')drvLoad()};modal.style.display='block'}
 async function loadMods(){try{const r=await api('/api/mods');const a=r.mods||[];$('modlist').innerHTML=a.length?a.map(m=>`<div class="li"><b>${m.name}</b><div class="sm">${m.files} files · ${hsz(m.bytes)}</div><div class="row"><button class="b" onclick="installMod(${JSON.stringify(m.name)})">Install</button><button class="b g" onclick="deleteMod(${JSON.stringify(m.name)})">Delete</button></div></div>`).join(''):'No MODs imported yet.'}catch(e){$('modlist').textContent='Could not load MOD library: '+e}}
 async function importMod(){const source=$('modsrc').value.trim();if(!source)return alert('Choose the MOD folder first.');$('modmsg').textContent='Importing…';const r=await api('/api/mods/import',{source,name:$('modname').value.trim()});$('modmsg').textContent=r.ok?`Imported ${r.mod.name}: ${r.mod.files} files (${hsz(r.mod.bytes)}).`:('Import failed: '+r.error);if(r.ok){$('modname').value='';loadMods()}}
-async function installMod(name){const target=$('modtarget').value.trim();if(!await ask('Install '+name+' into '+target+'? Existing files with matching names will be backed up before replacement.','Install'))return;$('modmsg').textContent='Installing via ADB…';const r=await api('/api/mods/install',{name,target});$('modmsg').textContent=r.ok?`Installed ${r.installed} files. Backed up ${r.backed_up} existing files${r.backup?' to '+r.backup:''}.`:'Install failed: '+r.error;}
+async function installMod(name){
+    $('modmsg').textContent='Tombol Install terpanggil: '+name;
+
+    try {
+        const target=$('modtarget').value.trim();
+
+        if(!target){
+            $('modmsg').textContent='Install gagal: Target folder masih kosong.';
+            return;
+        }
+
+        if(!await ask(
+            'Install '+name+' into '+target+'? Existing files with matching names will be backed up before replacement.',
+            'Install'
+        )) return;
+
+        $('modmsg').textContent='Installing via ADB…';
+
+        const r=await api('/api/mods/install',{name,target});
+
+        if(r.ok){
+            $('modmsg').textContent=
+                `Installed ${r.installed} files. Backed up ${r.backed_up} existing files${r.backup?' to '+r.backup:''}.`;
+        }else{
+            $('modmsg').textContent='Install failed: '+r.error;
+        }
+
+    }catch(e){
+        $('modmsg').textContent='ERROR: '+e.message;
+    }
+}
 async function deleteMod(name){if(!await ask('Delete imported MOD '+name+' from the library? This does not remove files already installed in the game.','Delete'))return;const r=await api('/api/mods/delete',{name});$('modmsg').textContent=r.ok?'MOD deleted.':'Delete failed: '+r.error;loadMods()}
 doctor();loadCfg();status();loadMods();setInterval(status,60000);
 $('folder').addEventListener('change',drvLoad);$('folder').addEventListener('input',drvLoad);
