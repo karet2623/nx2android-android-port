@@ -19,7 +19,7 @@ button.b{padding:11px 14px;border-radius:8px;border:0;background:var(--red);colo
 </style></head><body>
 <header><b class="t"><i>nx2</i>android</b><span id="ver"></span><button onclick="checkUpdate()">Update</button><button id="quit" onclick="quit()" style="display:none">Quit</button></header>
 <div id="ban">An update is ready. <button onclick="restart()">Restart to apply</button></div>
-<nav><button class="on" data-t="setup">Setup</button><button data-t="port">Port</button><button data-t="device">Device</button><button data-t="log">Log</button></nav>
+<nav><button class="on" data-t="setup">Setup</button><button data-t="port">Port</button><button data-t="mods">Mods</button><button data-t="device">Device</button><button data-t="log">Log</button></nav>
 <main>
 <section id="setup" class="on">
  <div class="card"><div id="checks" class="sm">checking…</div><div class="row"><button class="b g" onclick="doctor()">Re-check</button><button class="b" onclick="tools()">Download missing tools</button></div>
@@ -51,6 +51,16 @@ button.b{padding:11px 14px;border-radius:8px;border:0;background:var(--red);colo
  <div class="row"><button class="b g" onclick="installApk()">Install APK</button><button class="b" id="cpbtn" onclick="copyData()" disabled>Copy data</button></div>
  <div class="sm" id="cpnote">Copy data is locked: it needs adb. Open the Device tab, pair and connect (wireless debugging), then it unlocks. </div>
  <div class="sm" style="margin-top:8px">Without adb the data folder above must be copied by hand to <b>Android/data/&lt;package&gt;/files</b> (Android does not let apps do it). Instructions for rooted phones and for Shizuku:<br><a href="https://github.com/A2redweb/nx2android-android-port/blob/main/docs/COPY_DATA.md" target="_blank" rel="noopener">github.com/A2redweb/nx2android-android-port/blob/main/docs/COPY_DATA.md</a></div></div>
+</section>
+<section id="mods">
+ <div class="card"><b>MOD Library</b><div class="sm" style="margin-top:5px">Import a folder containing the MOD files. The folder structure is preserved in the app's private MOD library.</div>
+ <label>MOD folder on phone</label><div class="row"><input type="text" id="modsrc" placeholder="/sdcard/Download/MyMOD"><button class="b g" style="flex:none" onclick="pick('modsrc',true)">Browse</button></div>
+ <label>MOD name (optional)</label><input type="text" id="modname" placeholder="Use folder name if blank"><button class="b" onclick="importMod()">Import MOD</button>
+ <div class="sm" id="modmsg" style="margin-top:8px"></div></div>
+ <div class="card"><b>Installed MOD library</b><div id="modlist" class="sm" style="margin-top:8px">Loading…</div><button class="b g" onclick="loadMods()">Refresh</button></div>
+ <div class="card"><b>Install destination</b><div class="sm">Install uses ADB because Android blocks ordinary file managers from writing to Android/data. Example destination:</div>
+ <input type="text" id="modtarget" value="" placeholder="/sdcard/Android/data/<package>/files">
+ <div class="sm" style="margin-top:8px">Enter the exact package folder used by your installed port. Existing files with the same names are backed up inside NX2Android before replacement. MOD files are copied preserving their folder paths.</div></div>
 </section>
 <section id="device">
  <div class="card"><div class="sm">Optional. Only needed for "Install with adb" or if copying data is blocked on your Android. Settings → Developer options → Wireless debugging → Pair device with pairing code.</div>
@@ -142,6 +152,10 @@ async function pick(id,dir,path){places(id,dir);if(window.NX2A&&NX2A.pick){$('mn
  $('mlist').querySelector('[data-up]').onclick=e=>pick(id,dir,e.target.dataset.up);
  $('mlist').querySelectorAll('[data-p]').forEach(e=>e.onclick=()=>{if(e.dataset.d=='true')pick(id,dir,e.dataset.p);else if(!dir){$(id).value=e.dataset.p;modal.style.display='none'}});
  $('msel').style.display=dir?'':'none';$('msel').onclick=()=>{$(id).value=r.path;modal.style.display='none';if(id=='folder')drvLoad()};modal.style.display='block'}
-doctor();loadCfg();status();setInterval(status,60000);
+async function loadMods(){try{const r=await api('/api/mods');const a=r.mods||[];$('modlist').innerHTML=a.length?a.map(m=>`<div class="li"><b>${m.name}</b><div class="sm">${m.files} files · ${hsz(m.bytes)}</div><div class="row"><button class="b" onclick="installMod(${JSON.stringify(m.name)})">Install</button><button class="b g" onclick="deleteMod(${JSON.stringify(m.name)})">Delete</button></div></div>`).join(''):'No MODs imported yet.'}catch(e){$('modlist').textContent='Could not load MOD library: '+e}}
+async function importMod(){const source=$('modsrc').value.trim();if(!source)return alert('Choose the MOD folder first.');$('modmsg').textContent='Importing…';const r=await api('/api/mods/import',{source,name:$('modname').value.trim()});$('modmsg').textContent=r.ok?`Imported ${r.mod.name}: ${r.mod.files} files (${hsz(r.mod.bytes)}).`:('Import failed: '+r.error);if(r.ok){$('modname').value='';loadMods()}}
+async function installMod(name){const target=$('modtarget').value.trim();if(!await ask('Install '+name+' into '+target+'? Existing files with matching names will be backed up before replacement.','Install'))return;$('modmsg').textContent='Installing via ADB…';const r=await api('/api/mods/install',{name,target});$('modmsg').textContent=r.ok?`Installed ${r.installed} files. Backed up ${r.backed_up} existing files${r.backup?' to '+r.backup:''}.`:'Install failed: '+r.error;}
+async function deleteMod(name){if(!await ask('Delete imported MOD '+name+' from the library? This does not remove files already installed in the game.','Delete'))return;const r=await api('/api/mods/delete',{name});$('modmsg').textContent=r.ok?'MOD deleted.':'Delete failed: '+r.error;loadMods()}
+doctor();loadCfg();status();loadMods();setInterval(status,60000);
 $('folder').addEventListener('change',drvLoad);$('folder').addEventListener('input',drvLoad);
 </script></body></html>
