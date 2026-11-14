@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """nx2android phone GUI: a local web app (stdlib only) that drives `python -m porter`. Only the app itself can use it: a random token, a Host check and a same-site cookie guard every request."""
-import contextlib, glob, hmac, http.cookies, io, json, os, re, signal, subprocess, sys, threading, time
+import contextlib, glob, hmac, http.cookies, io, json, os, re, signal, subprocess, sys, threading, time, shutil, shlex
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -51,6 +51,8 @@ DEFAULT_OUT = '/sdcard/Switch/Ports'
 GAME_EXT = ('.nsp', '.xci', '.nsz', '.xcz')
 JOB = {'p': None, 'lines': [], 'done': True, 'code': None, 'kind': '', 'stage': '', 'frac': None, 'seq': 0}
 LOCK = threading.Lock()
+MODS_DIR = Path(os.environ.get('NX2A_MODS', Path.home() / '.config' / 'nx2android' / 'mods'))
+MOD_BACKUPS = Path(os.environ.get('NX2A_MOD_BACKUPS', Path.home() / '.config' / 'nx2android' / 'mod_backups'))
 
 
 def cfg():
@@ -343,6 +345,73 @@ def ver(d):
     except Exception: return -1
 
 
+def mod_slug(name):
+    name = re.sub(r'[^A-Za-z0-9._ -]+', '_', str(name)).strip(' .')
+    if not name or name in ('.', '..'): raise ValueError('Invalid MOD name')
+    return name[:80]
+
+
+def list_mods():
+    MODS_DIR.mkdir(parents=True, exist_ok=True)
+    out = []
+    for d in sorted(MODS_DIR.iterdir(), key=lambda x: x.name.lower()):
+        if d.is_dir() and not d.is_symlink():
+            count = sum(len(fs) for _, _, fs in os.walk(d))
+            out.append({'name': d.name, 'files': count, 'bytes': dir_size(d)})
+    return out
+
+
+def import_mod(source, name=''):
+    src = Path(norm_path(str(source or ''))).expanduser()
+    if not src.is_dir() or src.is_symlink(): raise ValueError('Choose a readable MOD folder, not a file.')
+    # Reject empty folders and symlinks so imports cannot escape their selected directory.
+    files = [p for p in src.rglob('*') if p.is_file() and not p.is_symlink()]
+    if not files: raise ValueError('The selected folder contains no files.')
+    if len(files) > 20000: raise ValueError('Too many files (limit 20,000).')
+    total = sum(f.stat().st_size for f in files)
+    if total > 8 * 1024**3: raise ValueError('MOD folder is larger than 8 GB.')
+    slug = mod_slug(name or src.name)
+    MODS_DIR.mkdir(parents=True, exist_ok=True)
+    dest = MODS_DIR / slug
+    if dest.exists(): raise ValueError('A MOD with this name already exists. Rename it or delete the old import first.')
+    shutil.copytree(src, dest, symlinks=False, ignore=shutil.ignore_patterns('.DS_Store', 'Thumbs.db'))
+    return {'name': slug, 'files': len(files), 'bytes': total}
+
+
+def install_mod(name, target):
+    name = mod_slug(name)
+    src = MODS_DIR / name
+    if not src.is_dir() or src.is_symlink(): raise ValueError('MOD not found in the library.')
+    target = str(target or '').rstrip('/')
+    # Deliberately restrict writes to this app's conventional game-data files directory.
+    if not re.fullmatch(r'/sdcard/Android/data/[A-Za-z0-9_.]+/files', target):
+        raise ValueError('Target must be /sdcard/Android/data/<game.package.name>/files')
+    if not adb_ready(): raise ValueError('ADB is not connected. Open Device, connect, then retry.')
+    files = [p for p in src.rglob('*') if p.is_file() and not p.is_symlink()]
+    if not files: raise ValueError('This MOD has no files.')
+    stamp = time.strftime('%Y%m%d-%H%M%S')
+    backup_root = MOD_BACKUPS / f'{name}-{stamp}'
+    pushed = 0; backed = 0
+    for f in files:
+        rel = f.relative_to(src).as_posix()
+        remote = target + '/' + rel
+        remote_dir = remote.rsplit('/', 1)[0]
+        mk = subprocess.run(['adb', 'shell', 'mkdir', '-p', remote_dir], capture_output=True, text=True, timeout=30, env=ENV)
+        if mk.returncode: raise RuntimeError(f'Cannot create destination folder {remote_dir}: {(mk.stderr or mk.stdout)[-300:]}')
+        # Save an existing destination file before replacing it.
+        exists = subprocess.run(['adb', 'shell', 'sh', '-c', 'test -f ' + shlex.quote(remote)], capture_output=True, text=True, timeout=20, env=ENV)
+        if exists.returncode == 0:
+            local_backup = backup_root / rel
+            local_backup.parent.mkdir(parents=True, exist_ok=True)
+            pull = subprocess.run(['adb', 'pull', remote, str(local_backup)], capture_output=True, text=True, timeout=120, env=ENV)
+            if pull.returncode == 0: backed += 1
+            else: raise RuntimeError(f'Backup failed for {rel}; install stopped before replacing it: {(pull.stderr or pull.stdout)[-300:]}')
+        push = subprocess.run(['adb', 'push', str(f), remote], capture_output=True, text=True, timeout=180, env=ENV)
+        if push.returncode: raise RuntimeError(f'Copy failed for {rel}: {(push.stderr or push.stdout)[-300:]}')
+        pushed += 1
+    return {'installed': pushed, 'backed_up': backed, 'backup': str(backup_root) if backed else ''}
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
@@ -382,6 +451,7 @@ class H(BaseHTTPRequestHandler):
             try: return self.j({'checks': json.loads(out)})
             except ValueError: return self.j({'error': (err or out)[-600:]})
         if u.path == '/api/config': return self.j(cfg())
+        if u.path == '/api/mods': return self.j({'mods': list_mods(), 'library': str(MODS_DIR)})
         if u.path == '/api/lastlog': return self.j(last_build_log())
         if u.path == '/api/work': return self.j({'bytes': sum(dir_size(d) for d in build_dirs()), 'dirs': [d.name for d in build_dirs()]})
         if u.path == '/api/summary': return self.j({'running': not JOB['done'], 'kind': JOB['kind'], 'stage': JOB['stage'], 'frac': JOB['frac'], 'code': JOB['code'], 'seq': JOB['seq']})
@@ -406,9 +476,21 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get('Content-Length') or 0)
         try: o = json.loads(self.rfile.read(n) or b'{}')
         except ValueError: return self.j({'error': 'bad json'}, 400)
-        for k in ('data', 'apk', 'folder', 'vulkan_driver', 'out', 'path'):
+        for k in ('data', 'apk', 'folder', 'vulkan_driver', 'out', 'path', 'source'):
             if k in o: o[k] = norm_path(o[k])
         if isinstance(o.get('paths'), list): o['paths'] = [norm_path(x) for x in o['paths']]
+        if u.path == '/api/mods/import':
+            try: return self.j({'ok': True, 'mod': import_mod(o.get('source'), o.get('name', ''))})
+            except Exception as e: return self.j({'ok': False, 'error': str(e)})
+        if u.path == '/api/mods/install':
+            try: return self.j({'ok': True, **install_mod(o.get('name'), o.get('target'))})
+            except Exception as e: return self.j({'ok': False, 'error': str(e)})
+        if u.path == '/api/mods/delete':
+            try:
+                name = mod_slug(o.get('name', '')); d = MODS_DIR / name
+                if not d.is_dir() or d.is_symlink(): raise ValueError('MOD not found.')
+                shutil.rmtree(d); return self.j({'ok': True})
+            except Exception as e: return self.j({'ok': False, 'error': str(e)})
         if u.path == '/api/config':
             if o.get('key') not in ('keys', 'out'): return self.j({'ok': False, 'msg': 'unknown setting'})
             out, err, c = porter('config', o['key'], o['value']); return self.j({'ok': c == 0, 'msg': (err or out)[-300:]})
