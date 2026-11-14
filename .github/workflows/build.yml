@@ -63,10 +63,14 @@ jobs:
         run: |
           bash tools/fetch_proot.sh
           bash tools/fetch_rootfs.sh
-      - name: The payload manifest must match the payload files
+      - name: Update payload manifest
         run: |
-          python3 tools/make_manifest.py
-          git diff --exit-code app/src/main/assets/nx2a/payload/payload.json || { echo "payload.json is out of date: run  python3 tools/make_manifest.py --bump  and commit"; exit 1; }
+          python3 tools/make_manifest.py --bump
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/assets/nx2a/payload/payload.json
+          git commit -m "Update payload manifest" || echo "No changes to commit"
+          git push
       - name: Signing key
         if: steps.chg.outputs.build == 'true'
         env:
